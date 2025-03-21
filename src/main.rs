@@ -3,7 +3,7 @@ mod fairings;
 mod logic;
 mod routes;
 
-use rocket::{get, launch, routes, Build, Config, Rocket};
+use rocket::{catchers, get, launch, routes, Build, Config, Rocket};
 
 #[launch]
 async fn rocket() -> Rocket<Build> {
@@ -24,6 +24,12 @@ async fn rocket() -> Rocket<Build> {
 	rocket::custom(figment)
 		.attach(routes::aliucord::routes())
 		.mount("/", routes![root])
+		.register("/", catchers![
+			routes::catchers::catch_500,
+			routes::catchers::catch_400,
+			routes::catchers::catch_404,
+			routes::catchers::catch_all,
+		])
 }
 
 #[get("/")]
