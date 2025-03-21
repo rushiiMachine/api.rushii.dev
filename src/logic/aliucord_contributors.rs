@@ -1,11 +1,13 @@
 use crate::config::ORG_NAME;
 use crate::logic::github_api;
 use log::{debug, warn};
-use rocket::serde::Serialize;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::RwLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+/// Global contributor cache used by requests for obtaining data.
+/// The write lock should not be held for an extended period of time.
 static CONTRIBUTORS_CACHE: RwLock<ContributorsState> = RwLock::new(ContributorsState::Populating);
 
 /// Contributors cache state
@@ -14,15 +16,16 @@ pub enum ContributorsState {
 	/// Data is currently being fetched, come back later.
 	#[default]
 	Populating,
-	/// Data exists but is outdated, cache for less time.
+	/// First data fetch failed, come back later.
+	PopulatingError,
+	/// Data exists but is outdated, cache for only a little time.
 	Outdated(Vec<Contributor>),
 	/// Data exists and is still fresh, cache for full time.
-	Fresh(Vec<Contributor>),
+	Fresh(Instant, Vec<Contributor>),
 }
 
 /// Serializable model to be sent back as an API response.
 #[derive(Serialize, Debug, Clone)]
-#[serde(crate = "rocket::serde")]
 pub struct Contributor {
 	pub username: String,
 	#[serde(rename = "avatarUrl")]
@@ -47,7 +50,7 @@ pub async fn init_service() {
 					let mut guard = CONTRIBUTORS_CACHE.write()
 						.unwrap_or_else(|poison| poison.into_inner());
 
-					*guard = ContributorsState::Fresh(contributors);
+					*guard = ContributorsState::Fresh(Instant::now(), contributors);
 					CONTRIBUTORS_CACHE.clear_poison();
 
 					interval.reset_after(ONE_DAY);
@@ -58,8 +61,12 @@ pub async fn init_service() {
 					let mut guard = CONTRIBUTORS_CACHE.write()
 						.unwrap_or_else(|poison| poison.into_inner());
 
-					if let ContributorsState::Fresh(data) = std::mem::take(&mut *guard) {
-						*guard = ContributorsState::Outdated(data);
+					match std::mem::take(&mut *guard) {
+						ContributorsState::Populating =>
+							*guard = ContributorsState::PopulatingError,
+						ContributorsState::Fresh(_, data) =>
+							*guard = ContributorsState::Outdated(data),
+						_ => {}
 					}
 
 					interval.reset_after(ONE_HOUR);

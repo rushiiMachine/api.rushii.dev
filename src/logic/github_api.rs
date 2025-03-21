@@ -1,7 +1,7 @@
 use crate::config::GITHUB_TOKEN;
 use reqwest::header::HeaderMap;
 use reqwest::{Client, ClientBuilder};
-use rocket::serde::Deserialize;
+use serde::Deserialize;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -13,16 +13,15 @@ const GITHUB_HTTP: LazyLock<Client> = LazyLock::new(|| {
 	headers.insert("User-Agent", "api.rushii.dev (github.com/rushiiMachine/api.rushii.dev)".parse().unwrap());
 	headers.insert("X-GitHub-Api-Version", "2022-11-28".parse().unwrap());
 
-	// TODO: enable compression
 	ClientBuilder::new()
 		.timeout(Duration::from_secs(60))
 		.default_headers(headers)
+		.gzip(true)
 		.build()
 		.unwrap()
 });
 
 #[derive(Deserialize, Debug)]
-#[serde(crate = "rocket::serde")]
 pub struct GithubContributor {
 	pub login: String,
 	pub avatar_url: String,
@@ -30,7 +29,6 @@ pub struct GithubContributor {
 }
 
 #[derive(Deserialize, Debug)]
-#[serde(crate = "rocket::serde")]
 pub struct GithubRepository {
 	pub name: String,
 	pub fork: bool,
