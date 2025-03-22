@@ -28,4 +28,4 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
 
       - name: Build
-        run: cargo build
+        run: cargo build --locked
