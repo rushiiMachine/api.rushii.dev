@@ -1,5 +1,6 @@
 use crate::config::ORG_NAME;
 use crate::logic::github_api;
+use crate::logic::github_api::GithubContributor;
 use log::{debug, warn};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -27,11 +28,26 @@ pub enum ContributorsState {
 /// Serializable model to be sent back as an API response.
 #[derive(Serialize, Debug, Clone)]
 pub struct Contributor {
+	/// GitHub username
 	pub username: String,
+	/// GitHub avatar (full size)
 	#[serde(rename = "avatarUrl")]
 	pub avatar_url: String,
-	#[serde(rename = "contributions")]
-	pub contributions: u32,
+	/// The commit count of this user across all non-private,
+	/// non-forked repositories in the Aliucord organization.
+	pub commits: u32,
+	/// The repositories this user committed to,
+	/// in decreasing order of commit count per repository.
+	pub repositories: Vec<RepositoryContributor>,
+}
+
+/// Repository-specific commit count for a user.
+#[derive(Serialize, Debug, Clone)]
+pub struct RepositoryContributor {
+	/// The repository name
+	pub name: String,
+	/// The commit count of this user in this repository.
+	pub commits: u32,
 }
 
 /// Starts the background task to cache contributors data once a day.
@@ -88,41 +104,52 @@ pub async fn get_contributors() -> ContributorsState {
 
 /// Tries to fetch the contributors list from GitHub from scratch.
 async fn fetch_contributors() -> reqwest::Result<Vec<Contributor>> {
-	let mut contributors = Vec::new();
+	// Repo name mapped to raw GitHub contributor data
+	let mut contributors_flat = Vec::<(String, GithubContributor)>::new();
 
 	debug!("Refreshing contributors cache, fetching repositories for {ORG_NAME}");
 	let repos = github_api::fetch_org_repositories(ORG_NAME).await?;
 
 	// Fetch contributor list for each repo
 	for repo in repos {
-		if repo.private || repo.fork { continue; };
+		if repo.private || repo.fork || repo.name == "badges" { continue; };
 
 		debug!("Fetching contributors for {ORG_NAME}/{0}", repo.name);
-		let repo_contributors = github_api::fetch_contributors(ORG_NAME, &*repo.name).await?;
+		let contributors = github_api::fetch_contributors(ORG_NAME, &*repo.name).await?
+			.into_iter()
+			.map(|user| (repo.name.clone(), user));
 
-		contributors.extend(repo_contributors);
+		contributors_flat.extend(contributors);
 	}
 
 	// Group by contributor name
-	let mut contributors_grouped = HashMap::<String, Contributor>::new();
-	for cur in contributors {
-		contributors_grouped.entry(cur.login.clone())
-			.and_modify(|c| c.contributions += cur.contributions)
-			.or_insert_with(|| Contributor {
-				username: cur.login,
-				avatar_url: cur.avatar_url,
-				contributions: cur.contributions,
-			});
+	let mut contributors_mapped = HashMap::<String, Contributor>::new();
+	for (repo, user) in contributors_flat {
+		match contributors_mapped.get_mut(&user.login) {
+			Some(c) => {
+				c.commits += user.contributions;
+				c.repositories.push(RepositoryContributor { name: repo, commits: user.contributions });
+			}
+			None => {
+				contributors_mapped.insert(user.login.clone(), Contributor {
+					username: user.login,
+					avatar_url: user.avatar_url,
+					commits: user.contributions,
+					repositories: vec![RepositoryContributor { name: repo, commits: user.contributions }],
+				});
+			}
+		}
 	}
 
 	// Remove bots
-	contributors_grouped.remove("actions-user");
-	contributors_grouped.remove("crowdin-bot");
+	contributors_mapped.remove("actions-user");
+	contributors_mapped.remove("crowdin-bot");
 
 	// Collect into a list and sort
-	let mut contributors: Vec<Contributor> = contributors_grouped.into_values().collect();
-	contributors.sort_by_key(|c| c.contributions);
-	contributors.reverse();
+	let mut contributors: Vec<Contributor> = contributors_mapped.into_values().collect();
+	contributors.sort_by(|c1, c2| c2.commits.cmp(&c1.commits));
+	contributors.iter_mut().for_each(|c|
+		c.repositories.sort_by(|r1, r2| r2.commits.cmp(&r1.commits)));
 
 	debug!("Parsed contributors data: {contributors:?}");
 	Ok(contributors)
