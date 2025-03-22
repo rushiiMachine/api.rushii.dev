@@ -5,7 +5,7 @@ pub const ORG_NAME: &str = "Aliucord";
 
 /// The port to bind the API server to.
 pub const PORT: LazyLock<u16> = LazyLock::new(|| {
-	match std::env::var("HOST") {
+	match std::env::var("PORT") {
 		Ok(var) => u16::from_str(&var).expect("invalid PORT env"),
 		Err(_) => match cfg!(debug_assertions) {
 			true => 8000,
