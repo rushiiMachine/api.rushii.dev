@@ -4,7 +4,7 @@ WORKDIR /app/
 ARG TARGETARCH
 
 # Setup musl compiler
-RUN apk add --no-cache curl make perl musl-dev && \
+RUN apk add --no-cache curl make perl musl-dev ca-certificates tzdata && \
     ARCH=$(echo $TARGETARCH | sed 's/arm64/aarch64/;s/amd64/x86_64/') && \
     cd /tmp/ && \
     curl -sSLv -o $ARCH-linux-musl-cross.tgz https://musl.cc/$ARCH-linux-musl-cross.tgz && \
@@ -30,7 +30,11 @@ RUN \
 
 # Runner image
 FROM --platform=$TARGETPLATFORM scratch
-ENV PORT=8000
-EXPOSE $PORT
+
+# Copy TLS certs & timezone
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
+ENV TZ=Europe/Berlin
+
 COPY --from=build /app/api .
 CMD ["/api"]

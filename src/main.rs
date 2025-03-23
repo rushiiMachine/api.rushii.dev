@@ -20,6 +20,8 @@ async fn rocket() -> Rocket<Build> {
 
 	#[cfg(debug_assertions)]
 	let figment = figment.merge(("log_level", "debug"));
+	#[cfg(not(debug_assertions))]
+	let figment = figment.merge(("log_level", "normal"));
 
 	rocket::custom(figment)
 		.attach(routes::aliucord::routes())
